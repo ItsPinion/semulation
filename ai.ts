@@ -2,18 +2,9 @@ const canvas = document.getElementById("canves") as HTMLCanvasElement;
 const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
 const squareSize = 10;
 const gridSize = 50;
-
-const squares: SquareType[][] = Array.from({ length: gridSize }, () =>
-  Array.from({ length: gridSize }, () => ({
-    x: 0,
-    y: 0,
-    size: squareSize,
-    player: false,
-    wall: true,
-    moved: false,
-    moves: [],
-  }))
-);
+let bestPath: { i: number; j: number }[] = [];
+let lastPath: { i: number; j: number }[] = [];
+let squares: SquareType[][] = [];
 
 type SquareType = {
   x: number;
@@ -22,7 +13,6 @@ type SquareType = {
   player: boolean;
   wall: boolean;
   moved: boolean;
-  moves: string[];
 };
 
 function getColor({
@@ -33,7 +23,7 @@ function getColor({
   wall: boolean;
 }): string {
   if (player) return "#810000";
-  if (wall) return "#cfcfcf";
+  if (wall) return "#080808";
   return "#B2AFAF";
 }
 
@@ -77,78 +67,125 @@ function moveSquare(
   };
   squares[k][l] = tamp1;
   squares[i][j] = tamp2;
+  lastPath.push({ i, j });
 }
+function nextMove({ i, j }: { i: number; j: number }) {
+  const possibleMoves: { i: number; j: number }[] = [];
+  const directions = [
+    { i: -1, j: 0 },
+    { i: 1, j: 0 },
+    { i: 0, j: -1 },
+    { i: 0, j: 1 },
+  ];
 
-function nextMove({ i, j }: { i: number; j: number }): string | null {
-  const directions = ["left", "right", "up", "down"];
-  const possibleMoves = directions.filter((dir) => {
-    const [di, dj] =
-      dir === "left"
-        ? [-1, 0]
-        : dir === "right"
-        ? [1, 0]
-        : dir === "up"
-        ? [0, -1]
-        : [0, 1];
-    const ni = i + di;
-    const nj = j + dj;
-    return (
-      ni >= 0 &&
-      ni < gridSize &&
-      nj >= 0 &&
-      nj < gridSize &&
-      !squares[ni][nj].wall
-    );
+  directions.forEach((dir) => {
+    const newI = i + dir.i;
+    const newJ = j + dir.j;
+
+    if (
+      newI >= 0 &&
+      newI < gridSize &&
+      newJ >= 0 &&
+      newJ < gridSize &&
+      !squares[newI][newJ].wall &&
+      !lastPath.some((path) => path.i === newI && path.j === newJ)
+    ) {
+      possibleMoves.push({ i: newI, j: newJ });
+    }
   });
-  return possibleMoves.length
+
+  return possibleMoves.length > 0
     ? possibleMoves[Math.floor(Math.random() * possibleMoves.length)]
     : null;
 }
 
-function animate() {
-  squares.forEach((innerSquares, i) => {
-    innerSquares.forEach((square, j) => {
-      if (square.player && !square.moved) {
-        const move = nextMove({ i, j });
-        if (move) {
-          let moveTo;
-          switch (move) {
-            case "left":
-              moveTo = { k: i - 1, l: j };
-              break;
-            case "right":
-              moveTo = { k: i + 1, l: j };
-              break;
-            case "up":
-              moveTo = { k: i, l: j - 1 };
-              break;
-            case "down":
-              moveTo = { k: i, l: j + 1 };
-              break;
-          }
-          moveTo && moveSquare({ i, j }, moveTo);
+function newGen() {
+  return new Promise<void>((resolve) => {
+    let again = true;
+    squares.forEach((innerSquares, i) => {
+      innerSquares.forEach((square, j) => {
+        if (square.player && !square.moved) {
+          const moveTo = nextMove({ i, j });
+          moveTo
+            ? moveSquare({ i, j }, { k: moveTo.i, l: moveTo.j })
+            : (again = false);
         }
-      }
+      });
     });
+    drawSquares();
+    if (again) {
+      requestAnimationFrame(() => {
+        newGen().then(resolve); // Recursively call newGen until again is false
+      });
+    } else {
+      resolve(); // Resolve the Promise if again is false
+    }
   });
-  drawSquares();
+}
+
+function bestGen(index = 0) {
+  if (index >= bestPath.length - 1) {
+    return;
+  }
+
+  const moveTo = bestPath[index + 1];
+  if (moveTo) {
+    moveSquare(bestPath[index], { k: moveTo.i, l: moveTo.j });
+    drawSquares();
+  }
+
   setTimeout(() => {
-    requestAnimationFrame(animate);
+    bestGen(index + 1);
   }, 50);
 }
 
-squares[0][0].player = true;
-squares[1][0].player = true;
+function resetSquare() {
+  lastPath = [];
+  squares = Array.from({ length: gridSize }, () =>
+    Array.from({ length: gridSize }, () => ({
+      x: 0,
+      y: 0,
+      size: squareSize,
+      player: false,
+      wall: false,
+      moved: false,
+    }))
+  );
 
-squares[1].forEach((square, j) => {
-  j < gridSize / 2 && (square.wall = false);
+  squares[0][0].player = true;
+
+  createSquares();
+  drawSquares();
+}
+
+function executeAction() {
+  return new Promise<void>((resolve) => {
+    bestPath.length < lastPath.length && (bestPath = [...lastPath]);
+
+    resetSquare();
+    newGen().then(() => {
+      resolve(); // Resolve executeAction's promise when newGen is done
+    });
+  });
+}
+async function executeActionSequentially(count: number) {
+  const buttons = document.getElementById("ctrl") as HTMLDivElement;
+  console.log(buttons.style);
+  buttons.hidden = true;
+  for (let i = 0; i < count; i++) {
+    await executeAction(); // Assuming executeAction returns a promise
+  }
+  buttons.hidden = false;
+}
+
+// Attach the event listener to the button
+document.getElementById("new")?.addEventListener("click", () => {
+  executeActionSequentially(1000);
 });
 
-createSquares();
-drawSquares();
-
-document.getElementById("button")?.addEventListener("click", () => {
-  animate();
+document.getElementById("best")?.addEventListener("click", () => {
+  resetSquare();
+  bestGen();
 });
 
 export default {};
