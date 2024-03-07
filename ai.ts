@@ -3,7 +3,10 @@ const ctx = canvas.getContext("2d") as CanvasRenderingContext2D;
 const squareSize = 10;
 const gridSize = 50;
 let bestPath: { i: number; j: number }[] = [];
-let lastPath: { i: number; j: number }[] = [];
+let lastPath: { foundPath: boolean; path: { i: number; j: number }[] } = {
+  foundPath: false,
+  path: [],
+};
 let squares: SquareType[][] = [];
 
 type SquareType = {
@@ -12,18 +15,23 @@ type SquareType = {
   size: number;
   player: boolean;
   wall: boolean;
+  checkPoint: boolean;
   moved: boolean;
 };
 
 function getColor({
+  checkPoint,
   player,
   wall,
 }: {
+  checkPoint: boolean;
   player: boolean;
   wall: boolean;
 }): string {
+  if (checkPoint) return "#8888cf";
   if (player) return "#810000";
   if (wall) return "#080808";
+
   return "#B2AFAF";
 }
 
@@ -42,7 +50,11 @@ function drawSquares(): void {
   squares.forEach((innerSquare) => {
     innerSquare.forEach((square) => {
       square.moved = false;
-      ctx.fillStyle = getColor({ player: square.player, wall: square.wall });
+      ctx.fillStyle = getColor({
+        player: square.player,
+        wall: square.wall,
+        checkPoint: square.checkPoint,
+      });
       ctx.fillRect(square.x, square.y, square.size, square.size);
     });
   });
@@ -58,16 +70,21 @@ function moveSquare(
     ...squares[i][j],
     x: squares[k][l].x,
     y: squares[k][l].y,
+    checkPoint: squares[k][l].checkPoint,
     moved: true,
   };
   const tamp2: SquareType = {
     ...squares[k][l],
     x: squares[i][j].x,
     y: squares[i][j].y,
+    checkPoint: squares[i][j].checkPoint,
   };
   squares[k][l] = tamp1;
   squares[i][j] = tamp2;
-  lastPath.push({ i, j });
+
+  lastPath.foundPath = squares[k][l].checkPoint;
+
+  lastPath.path.push({ i, j });
 }
 function nextMove({ i, j }: { i: number; j: number }) {
   const possibleMoves: { i: number; j: number }[] = [];
@@ -88,7 +105,7 @@ function nextMove({ i, j }: { i: number; j: number }) {
       newJ >= 0 &&
       newJ < gridSize &&
       !squares[newI][newJ].wall &&
-      !lastPath.some((path) => path.i === newI && path.j === newJ)
+      !lastPath.path.some((path) => path.i === newI && path.j === newJ)
     ) {
       possibleMoves.push({ i: newI, j: newJ });
     }
@@ -109,16 +126,17 @@ function newGen() {
           moveTo
             ? moveSquare({ i, j }, { k: moveTo.i, l: moveTo.j })
             : (again = false);
+          lastPath.foundPath && (again = false);
         }
       });
     });
     drawSquares();
     if (again) {
       requestAnimationFrame(() => {
-        newGen().then(resolve); // Recursively call newGen until again is false
+        newGen().then(resolve);
       });
     } else {
-      resolve(); // Resolve the Promise if again is false
+      resolve();
     }
   });
 }
@@ -140,7 +158,7 @@ function bestGen(index = 0) {
 }
 
 function resetSquare() {
-  lastPath = [];
+  lastPath = { foundPath: false, path: [] };
   squares = Array.from({ length: gridSize }, () =>
     Array.from({ length: gridSize }, () => ({
       x: 0,
@@ -148,11 +166,14 @@ function resetSquare() {
       size: squareSize,
       player: false,
       wall: false,
+      checkPoint: false,
       moved: false,
     }))
   );
+  
 
   squares[0][0].player = true;
+  squares[20][20].checkPoint = true;
 
   createSquares();
   drawSquares();
@@ -160,27 +181,32 @@ function resetSquare() {
 
 function executeAction() {
   return new Promise<void>((resolve) => {
-    bestPath.length < lastPath.length && (bestPath = [...lastPath]);
+    console.log(lastPath);
+
 
     resetSquare();
     newGen().then(() => {
-      resolve(); // Resolve executeAction's promise when newGen is done
+      resolve();
     });
   });
 }
-async function executeActionSequentially(count: number) {
+async function executeActionSequentially() {
   const buttons = document.getElementById("ctrl") as HTMLDivElement;
-  console.log(buttons.style);
   buttons.hidden = true;
-  for (let i = 0; i < count; i++) {
-    await executeAction(); // Assuming executeAction returns a promise
-  }
+
+  do {
+    await executeAction();
+
+    if (lastPath.foundPath) {
+      (bestPath.length > lastPath.path.length || bestPath.length < 1) &&
+        (bestPath = [...lastPath.path]);
+    }
+  } while (!lastPath.foundPath);
   buttons.hidden = false;
 }
 
-// Attach the event listener to the button
 document.getElementById("new")?.addEventListener("click", () => {
-  executeActionSequentially(1000);
+  executeActionSequentially();
 });
 
 document.getElementById("best")?.addEventListener("click", () => {
